@@ -41,7 +41,7 @@ echo 64 > "$instance/buffer_size_kb"
 # __brcmf_dbg(level, func, fmt, error_string, fwerr): only static strings
 # and the numeric error argument are fetched. Never fetch data/key buffers.
 # The filter retains only this precise fwil.c format, before buffer recording.
-printf 'p:%s/firmware_error brcmfmac:__brcmf_dbg func=$arg2:string format=$arg3:string fwerr=%%x4:s32\n' "$group" >> "$trace_root/kprobe_events"
+printf 'p:%s/firmware_error brcmfmac:__brcmf_dbg func=+0($arg2):string format=+0($arg3):string fwerr=%%x4:s32\n' "$group" >> "$trace_root/kprobe_events"
 event_created=1
 echo 'func == "brcmf_fil_cmd_data" && format ~ "Firmware error:*"' > "$instance/events/$group/firmware_error/filter"
 echo 1 > "$instance/events/$group/firmware_error/enable"
