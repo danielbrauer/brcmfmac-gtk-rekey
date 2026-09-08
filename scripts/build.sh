@@ -49,9 +49,12 @@ if [[ "$variant" == retry ]]; then
   git -C "$source_root" apply "$repo_root/patches/0002-brcmfmac-retry-reused-gtk-after-clear.patch"
 fi
 
-make -C "$source_root" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
-make -C "$source_root" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules_prepare
 make -C "$source_root" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+  LOCALVERSION=+rpt-rpi-v8 olddefconfig
+make -C "$source_root" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+  LOCALVERSION=+rpt-rpi-v8 modules_prepare
+make -C "$source_root" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+  LOCALVERSION=+rpt-rpi-v8 \
   M="$driver_dir" modules
 
 cp "$module_file" "$output_dir/brcmfmac-${variant}.ko"

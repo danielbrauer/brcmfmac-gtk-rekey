@@ -31,8 +31,9 @@ jobs:
 
       - name: Verify module identity
         run: |
-          test "$(modinfo -F vermagic "dist/${{ matrix.variant }}/brcmfmac-${{ matrix.variant }}.ko" | awk '{print $1}')" = \
-            "6.18.39+rpt-rpi-v8"
+          actual_release="$(modinfo -F vermagic "dist/${{ matrix.variant }}/brcmfmac-${{ matrix.variant }}.ko" | awk '{print $1}')"
+          echo "module kernel release: $actual_release"
+          test "$actual_release" = "6.18.39+rpt-rpi-v8"
           modinfo "dist/${{ matrix.variant }}/brcmfmac-${{ matrix.variant }}.ko"
 
       - uses: actions/upload-artifact@v4
