@@ -32,9 +32,12 @@ addresses, or other network configuration.
 
 Research prototype. A live `trace` test reproduced failure when an occupied
 GTK slot was reused. A subsequent stock-driver probe identified the firmware
-rejection as **`BCME_REPLAY` (-51)**. The `retry` variant has been built by CI but has **not
-been deployed or demonstrated to fix the problem**. The completed trace test
-was cleaned up and the target returned to its untouched stock driver.
+rejection as **`BCME_REPLAY` (-51)**. An expanded trace then reproduced it with
+a changed key and an advancing EAPOL-Key Replay Counter, strongly suggesting
+a false replay rejection during replacement. The `retry` variant has been
+built by CI but has **not been deployed or demonstrated to fix the problem**.
+The completed trace tests were cleaned up and the target returned to its
+untouched stock driver, with normal options and control services verified.
 
 The modules are built as temporary test artifacts. They should be loaded from
 a staging directory without replacing the distribution module. A reboot must
@@ -79,15 +82,15 @@ recovery.
 
 This is evidence that failure coincides with reuse of an occupied group-key
 slot. Occupancy here is the **driver's bookkeeping**, not a direct inspection
-of the firmware's internal key table. The experiment does not yet establish
+of the firmware's internal key table. This first experiment did not establish
 why the firmware rejects the request, whether key contents or sequence state
 matter, or whether clearing the slot will recover it.
 
-The next trace build adds `same_ccmp_key` (comparison with the old host-cached
+The expanded trace adds `same_ccmp_key` (comparison with the old host-cached
 slot before overwriting it) and `seq_zero` (true only for a supplied six-byte
-all-zero sequence). Those fields were absent from the completed trace above
-and have not yet been observed on the target. The latter does not inspect the
-firmware's live receive counter.
+all-zero sequence). Those fields were absent from the first trace above;
+their live results appear below. The latter does not inspect the firmware's
+live receive counter.
 
 ### Stock-driver result: firmware replay rejection
 
@@ -124,11 +127,9 @@ same stock boot the failing group index was 2; after a new association it was
 
 `BCME_REPLAY` narrows the firmware's reason but does not prove that an incoming
 EAPOL frame was replayed, that the access point reused key bytes, or that the
-firmware's decision was correct. The missing distinction is whether the new
-request contains the same cached key or a genuinely different key, and how
-the supplied receive sequence interacts with retained firmware state. The
-new `same_ccmp_key` and `seq_zero` fields have not yet been exercised live.
-The stock probe fetched neither key bytes nor sequence values.
+firmware's decision was correct. The stock probe fetched neither key bytes
+nor sequence values. The expanded trace below addresses key identity and
+handshake freshness; retained firmware state remains unobservable.
 
 An earlier hot-swap run accidentally omitted the normal `roamoff=1` and
 `feature_disable=0x282000` options. It associated, then roamed and suffered a
@@ -136,6 +137,44 @@ firmware crash; the watchdog rebooted it into stock. That run changed more
 than the instrumentation and cannot isolate the trace patch's effect. Both
 loading paths now preserve the installed module options, and CI checks that
 forwarding remains in place.
+
+### Changed-key result: no observed handshake replay
+
+The expanded trace-only module from commit `778755c` reproduced the failure
+on 2026-09-08 with the normal module options preserved. A passive EAPOL prefix
+observer and firmware-return probes ran alongside it. Times are UTC+02:00:
+
+| Event | Time | GTK index | Occupied | Matches old cached key | Supplied receive sequence | Result |
+| --- | --- | --- | --- | --- | --- | --- |
+| Initial installation | 16:50:44 | 2 | No | N/A | Nonzero | Installed |
+| First group rekey | 16:59:19 | 1 | No | N/A | Zero | Installed |
+| Second group rekey | 17:09:19 | 2 | Yes | **No** | Zero | **BCME_REPLAY (-51)** |
+| Reconnection | 17:09:27 | 2 | No | N/A | Zero | Installed |
+
+The second group's EAPOL-Key Replay Counter was **greater** than the first
+group's, within the same observed association. Both group messages carried
+zero Key RSC; equality of those receive-sequence fields does not mean equality
+of handshake replay counters or key bytes. The failing driver call reported
+`replacing=1 same_ccmp_key=0 seq_len=6 seq_zero=1`. In the same supplicant task,
+the firmware returned -51 about 1.1 ms after entry; the host returned -52.
+The supplicant reported failure to install the GTK and disconnected. Key
+installation succeeded again about eight seconds later during reconnection.
+
+This rules out repetition of the old slot's cached key and an unchanged or
+decreasing handshake counter between the two observed group requests. The
+observer started after association and does not authenticate frames itself;
+the request reaching the driver's installation path also matters, because
+[wpa_supplicant 2.10](https://w1.fi/releases/wpa_supplicant-2.10.tar.gz)
+checks handshake freshness and MIC before that path (`src/rsn_supp/wpa.c`).
+The comparison is against the host cache, not all historical keys or the
+firmware's private table. It does not prove every access-point field correct.
+
+The strongest current explanation is a false replay rejection when a new
+GTK replaces an old slot whose earlier receive sequence was nonzero. Whether
+the firmware retains stale per-slot state, or the host's replacement command
+fails to express the required transition, remains unproven. Reusing a Key ID
+and supplying zero receive state for a fresh unused key are permitted; see
+the specification discussion below. No clear-and-retry recovery was active.
 
 ### Guidance from other implementations and public history
 
@@ -262,13 +301,12 @@ Clearing a key is state-changing; if recovery fails, connectivity can still
 be lost. Successful return codes alone will not demonstrate correct traffic
 decryption or security behavior.
 
-The observed `BCME_REPLAY` changes the next step: first compare the stock
-driver across access points and use the expanded trace to distinguish changed
-keys from identical cached keys. Do not treat clearing the slot and obtaining
-a successful return as a validated fix for a replay rejection. Establish
-that the request is a legitimate new key and that replay protection remains
-correct before attempting the retry candidate. Any later candidate test must
-hold kernel, firmware and module options constant, observe repeated reuse of
+The expanded trace establishes a changed key and advancing handshake counter
+at the rejection. Next compare the stock driver across access points and
+review the replacement command's replay-state semantics. Do not treat
+clearing the slot and obtaining a successful return as a validated fix for a
+replay rejection. Replay protection must remain correct. Any later candidate
+test must hold kernel, firmware and module options constant, observe repeated reuse of
 both GTK slots, and verify sustained group traffic as well as key-install
 outcomes. Keep all logs free of key material and network identifiers.
 
