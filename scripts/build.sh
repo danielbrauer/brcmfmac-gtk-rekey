@@ -49,6 +49,7 @@ cp "$headers_root/Module.symvers" "$source_root/Module.symvers"
 git -C "$source_root" apply "$repo_root/patches/0001-brcmfmac-trace-key-slot-reuse.patch"
 if [[ "$variant" == retry ]]; then
   git -C "$source_root" apply "$repo_root/patches/0002-brcmfmac-retry-reused-gtk-after-clear.patch"
+  python3 "$repo_root/scripts/test-key-recovery.py" "$driver_dir/brcmfmac/cfg80211.c"
 fi
 
 make -C "$source_root" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \

@@ -290,6 +290,12 @@ enter this recovery. The identical-key guard avoids deliberately clearing a
 cached copy of the same key and resetting its replay state. This guard does
 not establish complete replay safety: the host cache is not authoritative
 firmware state and broader protocol validation is still required.
+The retry build also compiles the actual patched `add_key` function against a
+recording firmware stub. Ten cases check changed versus identical keys,
+success without recovery, pairwise/unused/non-CCMP exclusions, transport and
+clear/retry failures, and exact preservation of the requested receive sequence
+across clear-and-retry. This tests host control flow, not firmware replay
+protection or over-the-air decryption.
 The current patch has no additional delay. The OpenBSD history does not by
 itself justify adding one.
 
