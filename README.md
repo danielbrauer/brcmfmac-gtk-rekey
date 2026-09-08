@@ -205,6 +205,41 @@ reports missing handshake-offload support, rather than proving the claimed
 GTK replacement defect. A short successful observation with several settings
 changed is insufficient to validate that workaround for this target.
 
+### Specification checks for the replay investigation
+
+There are three distinct objects; the numeric key slot is not a replay
+counter:
+
+| Object | What the receiver checks |
+| --- | --- |
+| EAPOL-Key Replay Counter | The group-handshake request must advance beyond previously accepted EAPOL-Key requests in the session. |
+| GTK key material and Key ID | Reusing a Key ID for a new GTK is normal key rotation; equal IDs do not imply equal keys. |
+| GTK receive sequence / packet-number state | Initialize state for a new key from the supplied receive sequence. Repeating an existing key must preserve its established replay state. |
+
+The [IEEE working-group discussion of 802.11-2016 section 12.7.7.2](https://www.ieee802.org/11/email/stds-802-11-tgm/msg01251.html)
+identifies the strict group-handshake counter requirement. The official
+[nonce-reuse clarification for SetKeys section 6.3.19.1.4](https://mentor.ieee.org/802.11/dcn/17/11-17-1602-03-000m-nonce-reuse-prevention.docx)
+distinguishes a new key from an existing key using the key value together
+with its address/type/ID, and requires existing-key counters to be preserved.
+The [2018 KRACK follow-up paper, section 2.5](https://papers.mathyvanhoef.com/ccs2018.pdf)
+documents that standard change. These references concern the specific WPA2
+rules being tested, not a full certification/compliance assessment.
+
+A zero receive sequence for a genuinely new, not-yet-used GTK is not by itself
+a replay. A retransmitted key announcement is also not automatically an
+invalid protocol operation: authenticated handshake freshness and retention
+of existing-key replay state must be considered separately. Clearing an
+existing identical key to force acceptance would undermine that retention.
+
+`observe-eapol-metadata.py` receives only the fixed Ethernet/EAPOL-Key prefix
+through Key RSC, stopping before the MIC and encrypted key data. It records
+counter progression comparisons and zero/equality flags, not counter values,
+addresses, nonces or key material. It is passive and does not authenticate
+the packet itself; correlate its observations with the supplicant's accepted
+key-install path and the driver trace. An observation begun after association
+has no initial-handshake counter baseline. It can still compare consecutive
+group requests; a new observed pairwise handshake starts a new baseline.
+
 ### Proposed recovery and remaining work
 
 The `retry` patch leaves successful installations unchanged. After firmware

@@ -23,6 +23,7 @@ jobs:
         run: |
           for script in scripts/*.sh; do bash -n "$script"; done
           grep -Fq '$CMDLINE_OPTS' scripts/arm-one-boot-test.sh
+          python3 scripts/test-eapol-metadata.py
 
       - name: Install build dependencies
         run: |
