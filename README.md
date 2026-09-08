@@ -78,6 +78,23 @@ systemctl status brcmfmac-test-rollback.timer
 journalctl -u brcmfmac-test-activate -u brcmfmac-test-rollback
 ```
 
+### One-boot loading
+
+Some SDIO firmware does not tolerate unloading and reloading the live driver.
+For that case, arm the candidate for exactly the next boot:
+
+```sh
+sudo ./scripts/arm-one-boot-test.sh /absolute/path/to/brcmfmac-trace.ko 45
+sudo systemctl reboot
+```
+
+The generated `modprobe` rule atomically consumes a one-shot marker before it
+inserts the candidate. Any later boot therefore loads the distribution module,
+even if the candidate causes an immediate crash. A boot timer removes the rule
+and reboots after the requested duration when the candidate remains running.
+If a crash already caused a second, stock-driver boot, the timer only cleans up
+the test files and does not reboot again.
+
 ## Privacy
 
 This is intentionally a public, device-agnostic repository. Do not attach raw
