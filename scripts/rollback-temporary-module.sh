@@ -17,6 +17,7 @@ if is_loaded brcmfmac; then
 fi
 
 modprobe brcmfmac
+modprobe brcmfmac_cyw
 
 for attempt in $(seq 1 24); do
   if nmcli -g GENERAL.STATE device show wlan0 2>/dev/null | grep -q '^100'; then

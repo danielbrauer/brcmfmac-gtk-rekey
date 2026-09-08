@@ -66,6 +66,10 @@ minutes, the activation job restores the stock module immediately. Otherwise,
 the timer restores it after the requested test duration. Because the stock
 module on disk is never replaced, a reboot also restores stock.
 
+The swap unloads and reloads the Raspberry Pi kernel's `brcmfmac_cyw`
+Cypress/Infineon companion plugin around the core `brcmfmac` module. This keeps
+the temporary and restored stacks equivalent to the normal boot-time stack.
+
 Inspect the detached jobs with:
 
 ```sh

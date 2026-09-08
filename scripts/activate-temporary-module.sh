@@ -24,6 +24,11 @@ if ! insmod "$candidate"; then
   exec "$rollback"
 fi
 
+if ! modprobe brcmfmac_cyw; then
+  echo "temporary brcmfmac loaded but Cypress/Infineon plugin did not; restoring stock" >&2
+  exec "$rollback"
+fi
+
 for attempt in $(seq 1 24); do
   if nmcli -g GENERAL.STATE device show wlan0 2>/dev/null | grep -q '^100'; then
     exit 0
