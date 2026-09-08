@@ -46,6 +46,34 @@ Run in a Debian or Ubuntu Linux environment with an ARM64 cross compiler:
 
 Artifacts are written beneath `dist/`.
 
+## Temporary test loading
+
+The loading scripts require root and must run from a persistent absolute path
+on the target. They never overwrite the distribution module.
+
+```sh
+sudo ./scripts/start-temporary-test.sh /absolute/path/to/brcmfmac-trace.ko 45
+```
+
+The command first verifies that the candidate's kernel release exactly matches
+the running kernel. It then arms a detached stock-driver rollback timer before
+launching a second detached unit that swaps the module. This is necessary when
+the management connection itself uses `wlan0`: SSH will disappear during the
+swap, but both jobs continue under systemd.
+
+If the temporary module fails to load or Wi-Fi does not reconnect within two
+minutes, the activation job restores the stock module immediately. Otherwise,
+the timer restores it after the requested test duration. Because the stock
+module on disk is never replaced, a reboot also restores stock.
+
+Inspect the detached jobs with:
+
+```sh
+systemctl status brcmfmac-test-activate.service
+systemctl status brcmfmac-test-rollback.timer
+journalctl -u brcmfmac-test-activate -u brcmfmac-test-rollback
+```
+
 ## Privacy
 
 This is intentionally a public, device-agnostic repository. Do not attach raw

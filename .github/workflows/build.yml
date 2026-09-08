@@ -19,6 +19,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Check shell scripts
+        run: bash -n scripts/*.sh
+
       - name: Install build dependencies
         run: |
           sudo apt-get update
