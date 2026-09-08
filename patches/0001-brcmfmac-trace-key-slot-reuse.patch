@@ -1,0 +1,42 @@
+From: brcmfmac GTK rekey experiments <noreply@example.invalid>
+Subject: [PATCH 1/2] wifi: brcmfmac: trace key slot reuse metadata
+
+Log only non-secret metadata needed to distinguish initial key installation
+from replacement of a driver key slot. Never log key bytes or addresses.
+
+---
+ drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
+@@ -2825,6 +2825,7 @@ brcmf_cfg80211_add_key(struct wiphy *wiphy, struct net_device *ndev,
+ 	s32 err;
+ 	u8 keybuf[8];
+ 	bool ext_key;
++	bool replacing;
+ 
+ 	brcmf_dbg(TRACE, "Enter\n");
+ 	brcmf_dbg(CONN, "key index (%d)\n", key_idx);
+@@ -2853,6 +2854,7 @@ brcmf_cfg80211_add_key(struct wiphy *wiphy, struct net_device *ndev,
+ 	}
+ 
+ 	key = &ifp->vif->profile.key[key_idx];
++	replacing = key->algo != CRYPTO_ALGO_OFF;
+ 	memset(key, 0, sizeof(*key));
+ 	if ((ext_key) && (!is_multicast_ether_addr(mac_addr)))
+ 		memcpy((char *)&key->ea, (void *)mac_addr, ETH_ALEN);
+@@ -2911,6 +2913,10 @@ brcmf_cfg80211_add_key(struct wiphy *wiphy, struct net_device *ndev,
+ 		goto done;
+ 	}
+ 
++	brcmf_info("install key: index=%u pairwise=%u ext=%u replacing=%u cipher=0x%x seq_len=%u\n",
++		   key_idx, pairwise, ext_key, replacing, params->cipher,
++		   params->seq_len);
++
+ 	err = send_key_to_dongle(ifp, key);
+ 	if (ext_key || err)
+ 		goto done;
+-- 
+2.51.0
