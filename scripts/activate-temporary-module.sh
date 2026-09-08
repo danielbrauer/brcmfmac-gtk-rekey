@@ -5,10 +5,19 @@ set -euo pipefail
 candidate="${1:?usage: $0 /absolute/path/to/brcmfmac-trace.ko}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 rollback="$script_dir/rollback-temporary-module.sh"
+declare -a module_args=()
 
 is_loaded() {
   grep -q "^$1 " /proc/modules
 }
+
+# Preserve settings from modprobe.d. Raspberry Pi OS supplies options that can
+# materially change firmware behavior, including disabling firmware roaming.
+while IFS= read -r argument; do
+  module_args+=("$argument")
+done < <(modprobe -c | awk '$1 == "options" && $2 == "brcmfmac" {
+  for (field = 3; field <= NF; field++) print $field
+}')
 
 for module in brcmfmac_wcc brcmfmac_cyw brcmfmac_bca; do
   if is_loaded "$module"; then
@@ -20,7 +29,7 @@ if is_loaded brcmfmac; then
   modprobe -r brcmfmac
 fi
 
-if ! insmod "$candidate"; then
+if ! insmod "$candidate" "${module_args[@]}"; then
   exec "$rollback"
 fi
 

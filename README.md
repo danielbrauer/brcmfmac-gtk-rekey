@@ -69,6 +69,8 @@ module on disk is never replaced, a reboot also restores stock.
 The swap unloads and reloads the Raspberry Pi kernel's `brcmfmac_cyw`
 Cypress/Infineon companion plugin around the core `brcmfmac` module. This keeps
 the temporary and restored stacks equivalent to the normal boot-time stack.
+It also carries the installed `modprobe.d` options into the temporary module;
+these settings can materially alter firmware behavior.
 
 Inspect the detached jobs with:
 
@@ -93,7 +95,8 @@ inserts the candidate. Any later boot therefore loads the distribution module,
 even if the candidate causes an immediate crash. A boot timer removes the rule
 and reboots after the requested duration when the candidate remains running.
 If a crash already caused a second, stock-driver boot, the timer only cleans up
-the test files and does not reboot again.
+the test files and does not reboot again. Kernel options appended by `modprobe`
+are forwarded unchanged to the candidate.
 
 ## Privacy
 
