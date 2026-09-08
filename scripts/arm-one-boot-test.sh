@@ -47,7 +47,7 @@ if [[ -e "$state_dir/armed" || -e "$state_dir/attempted" ]]; then
 fi
 
 install -d -m 0700 "$state_dir"
-printf 'install brcmfmac %s %s %s\n' "$loader" "$candidate" "$state_dir" \
+printf 'install brcmfmac %s %s %s $CMDLINE_OPTS\n' "$loader" "$candidate" "$state_dir" \
   > "$modprobe_config"
 
 printf '%s\n' \

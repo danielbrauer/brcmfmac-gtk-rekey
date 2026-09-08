@@ -96,7 +96,8 @@ even if the candidate causes an immediate crash. A boot timer removes the rule
 and reboots after the requested duration when the candidate remains running.
 If a crash already caused a second, stock-driver boot, the timer only cleans up
 the test files and does not reboot again. Kernel options appended by `modprobe`
-are forwarded unchanged to the candidate.
+are forwarded unchanged to the candidate through modprobe's `CMDLINE_OPTS`
+substitution.
 
 ## Privacy
 
