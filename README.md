@@ -340,6 +340,24 @@ ordinary unicast ping alone does not demonstrate that group-key decryption
 works. Keep stock-driver access-point comparison separate from a later retry
 candidate comparison on the original access point.
 
+### Bounded recovery validation
+
+Keep the failing access point and normal module options constant. Use the
+one-boot loader with a finite rollback timer; retain the unchanged stock
+module. Observe at least four group rotations in one association, including
+replacement of both initially used slots, and correlate any recovery with
+the firmware rejection and subsequent supplicant result.
+
+`scripts/observe-group-traffic.py` passively counts incoming broadcast,
+multicast and unicast Ethernet frames in 30-second windows. It receives only
+14-byte headers, stores no addresses, excludes outgoing frames and EAPOL,
+and prints only counts and timing. Run it alongside the EAPOL metadata
+observer and key-operation probes. Positive group counts after each rotation
+provide evidence of delivered group traffic. Silence is inconclusive when
+there is no controlled sender. These Ethernet observations do not expose the
+over-the-air key ID or packet number, and do not independently validate replay
+rejection, multicast-to-unicast behavior, or all security properties.
+
 ### Reading firmware errors on the stock driver
 
 `scripts/trace-stock-firmware-errors.sh` uses a private tracefs instance and
