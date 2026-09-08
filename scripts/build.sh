@@ -43,6 +43,8 @@ tar -xf "$sysroot/usr/src/linux-source-${source_series}.tar.xz" \
 headers_root="$sysroot/usr/src/linux-headers-$kernel_release"
 cp "$headers_root/.config" "$source_root/.config"
 cp "$headers_root/Module.symvers" "$source_root/Module.symvers"
+"$source_root/scripts/config" --file "$source_root/.config" \
+  --set-str LOCALVERSION ""
 
 git -C "$source_root" apply "$repo_root/patches/0001-brcmfmac-trace-key-slot-reuse.patch"
 if [[ "$variant" == retry ]]; then
