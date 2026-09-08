@@ -31,7 +31,8 @@ addresses, or other network configuration.
 ## Status
 
 Research prototype. A live `trace` test reproduced failure when an occupied
-GTK slot was reused. The `retry` variant has been built by CI but has **not
+GTK slot was reused. A subsequent stock-driver probe identified the firmware
+rejection as **`BCME_REPLAY` (-51)**. The `retry` variant has been built by CI but has **not
 been deployed or demonstrated to fix the problem**. The completed trace test
 was cleaned up and the target returned to its untouched stock driver.
 
@@ -87,6 +88,47 @@ slot before overwriting it) and `seq_zero` (true only for a supplied six-byte
 all-zero sequence). Those fields were absent from the completed trace above
 and have not yet been observed on the target. The latter does not inspect the
 firmware's live receive counter.
+
+### Stock-driver result: firmware replay rejection
+
+On 2026-09-08, targeted kprobes captured the following sequence on the
+distribution driver, with debug mask zero and no module reload or Wi-Fi
+configuration change. Times are local (UTC+02:00):
+
+| Event | Time | Key index | Result |
+| --- | --- | --- | --- |
+| First observed group rekey | 16:29:19 | 2 | Key operation returned 0; supplicant reported success |
+| Next group rekey | 16:39:19 | 1 | Firmware returned -51; host key operation returned -52 |
+| Reconnection | About 0.76 seconds later | Pairwise 0, group 1 | Both key operations returned 0 |
+
+The same supplicant task entered group-key installation, received the firmware
+error about one millisecond later, and returned -52. The exact kernel source's
+[`fwil.c` error table](https://github.com/torvalds/linux/blob/master/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.c)
+maps -51 to `BCME_REPLAY`; `brcmf_fil_cmd_data` translates
+negative firmware status to `-EBADE` (-52). This is a firmware replay rejection
+during key installation, not evidence of an operation timing out. Routine
+NetworkManager requests separately returned -23 (`BCME_UNSUPPORTED`); those
+were distinguishable by task and were not the failing GTK installation.
+
+A simultaneous one-ping-per-second gateway check received 329 of 330 replies,
+with one missing reply around the rekey interruption. This checks unicast
+reachability, not group-key decryption. The bounded probe finished and removed
+its events and trace instance; the stock driver, debug mask zero, and existing
+control/watchdog services were verified afterward.
+
+The baseline used firmware `9.88.4.77`, kernel `6.18.39+rpt-rpi-v8`,
+`wpa_supplicant` package `2:2.10-24`, WPA2-PSK with CCMP pairwise and group
+ciphers, power saving off, and a sampled signal of -30 dBm. Earlier in this
+same stock boot the failing group index was 2; after a new association it was
+1. A defect unique to numeric slot 2 therefore does not explain the logs.
+
+`BCME_REPLAY` narrows the firmware's reason but does not prove that an incoming
+EAPOL frame was replayed, that the access point reused key bytes, or that the
+firmware's decision was correct. The missing distinction is whether the new
+request contains the same cached key or a genuinely different key, and how
+the supplied receive sequence interacts with retained firmware state. The
+new `same_ccmp_key` and `seq_zero` fields have not yet been exercised live.
+The stock probe fetched neither key bytes nor sequence values.
 
 An earlier hot-swap run accidentally omitted the normal `roamoff=1` and
 `feature_disable=0x282000` options. It associated, then roamed and suffered a
@@ -145,6 +187,14 @@ forwarding remains in place.
   Disabling power saving did not help. It was closed during issue cleanup,
   without a fix. Its logs lack slot-occupancy tracing, so a shared underlying
   cause remains an inference.
+- **Earlier access-point comparison:** a
+  [January 2022 firsthand Raspberry Pi forum report](https://forums.raspberrypi.com/viewtopic.php?t=327169)
+  describes Zero 2 W failures every 20 minutes; another participant reports
+  two-hour failures with an hourly rekey interval. Participants saw different
+  behavior on a compatibility network or older access point. A proposed
+  PMF/rekey-settings explanation changed multiple settings, so it does not
+  isolate PMF or prove this target's cause. Turning off rekeying would also
+  remove the event being tested.
 
 A [May 2026 downstream workaround](https://github.com/lollonet/snapMULTI/pull/354)
 also reports periodic GTK failures on BCM43430/2 and changes module options.
@@ -177,13 +227,15 @@ Clearing a key is state-changing; if recovery fails, connectivity can still
 be lost. Successful return codes alone will not demonstrate correct traffic
 decryption or security behavior.
 
-Next, test the candidate with the same kernel, firmware, and module options,
-observe repeated reuse of both GTK slots, and verify sustained traffic as well
-as key-install outcomes. Compare behavior near each access point without
-changing access-point selection policy. Keep all logs free of key material
-and network identifiers. Record the firmware's specific rejection code if
-possible: the normal `-52` result collapses multiple firmware errors into a
-single host error.
+The observed `BCME_REPLAY` changes the next step: first compare the stock
+driver across access points and use the expanded trace to distinguish changed
+keys from identical cached keys. Do not treat clearing the slot and obtaining
+a successful return as a validated fix for a replay rejection. Establish
+that the request is a legitimate new key and that replay protection remains
+correct before attempting the retry candidate. Any later candidate test must
+hold kernel, firmware and module options constant, observe repeated reuse of
+both GTK slots, and verify sustained group traffic as well as key-install
+outcomes. Keep all logs free of key material and network identifiers.
 
 ### Recovery constraints
 
