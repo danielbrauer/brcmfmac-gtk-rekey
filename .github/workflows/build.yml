@@ -21,7 +21,7 @@ jobs:
 
       - name: Check shell scripts
         run: |
-          bash -n scripts/*.sh
+          for script in scripts/*.sh; do bash -n "$script"; done
           grep -Fq '$CMDLINE_OPTS' scripts/arm-one-boot-test.sh
 
       - name: Install build dependencies

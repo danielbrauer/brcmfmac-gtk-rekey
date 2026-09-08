@@ -18,10 +18,12 @@ CI downloads the archived Raspberry Pi source and headers for that exact
 package, verifies their SHA-256 digests, and produces two modules:
 
 - `trace`: records key index, cipher, group/pairwise classification, sequence
-  length, and whether the driver's key slot was already occupied.
-- `retry`: includes the trace and, after a failed replacement of an occupied
-  CCMP group-key slot, clears that slot using the driver's existing deletion
-  representation and retries once.
+  length, whether the driver's key slot was already occupied, whether a CCMP
+  GTK matches the cached key, and whether the supplied receive sequence is
+  zero. Only boolean comparisons are logged, never key or sequence bytes.
+- `retry`: includes the trace and, after firmware rejection of a changed key
+  in an occupied CCMP group-key slot, clears that slot using the driver's
+  existing deletion representation and retries once.
 
 Neither variant logs key bytes, credentials, SSIDs, BSSIDs, MAC addresses, IP
 addresses, or other network configuration.
@@ -80,6 +82,12 @@ of the firmware's internal key table. The experiment does not yet establish
 why the firmware rejects the request, whether key contents or sequence state
 matter, or whether clearing the slot will recover it.
 
+The next trace build adds `same_ccmp_key` (comparison with the old host-cached
+slot before overwriting it) and `seq_zero` (true only for a supplied six-byte
+all-zero sequence). Those fields were absent from the completed trace above
+and have not yet been observed on the target. The latter does not inspect the
+firmware's live receive counter.
+
 An earlier hot-swap run accidentally omitted the normal `roamoff=1` and
 `feature_disable=0x282000` options. It associated, then roamed and suffered a
 firmware crash; the watchdog rebooted it into stock. That run changed more
@@ -99,6 +107,17 @@ forwarding remains in place.
   [2018-07-17 ordering fix](https://github.com/openbsd/src/commit/2802c1786dcf2dffd4d14c32296bd81bfcdaf95e)
   serialized SDIO control and data packets so key installation could not
   overtake EAPOL transmission.
+  Inspection of the current
+  [upper-layer RSN group-key handler](https://github.com/openbsd/src/blob/master/sys/net80211/ieee80211_pae_input.c)
+  confirms that it calls `ic_set_key` directly for a changed GTK, without an
+  intervening driver deletion. In the current
+  [`bwfm_set_key_cb`](https://github.com/openbsd/src/blob/master/sys/dev/ic/bwfm.c),
+  the zero-initialized firmware key structure receives neither `rxiv` nor
+  `iv_initialized`, and the `wsec_key` call's return value is not checked.
+  These differences limit comparisons: an absence of immediate disconnects
+  would not by itself establish successful key installation or correct replay
+  protection. They are not reasons to omit replay state or ignore errors in
+  the Linux candidate.
 - **NetBSD `bwfm`:**
   [PR 57308](https://gnats.netbsd.org/57308) describes a Raspberry Pi 3 B+
   losing connectivity after hours, with replay-counter rejection and
@@ -138,15 +157,20 @@ changed is insufficient to validate that workaround for this target.
 
 ### Proposed recovery and remaining work
 
-The `retry` patch leaves successful installations unchanged. After a failed
-replacement of an occupied CCMP group-key slot, it clears just that slot using
-the existing deletion representation and retries the requested key once.
-Initial installs, pairwise keys, and non-CCMP keys do not enter this recovery.
+The `retry` patch leaves successful installations unchanged. After firmware
+rejection (`-EBADE`) of a changed key in an occupied CCMP group-key slot, it
+clears just that slot using the existing deletion representation and retries
+the requested key once. Initial installs, pairwise keys, non-CCMP keys,
+transport errors, and keys identical to that slot's cached CCMP key do not
+enter this recovery. The identical-key guard avoids deliberately clearing a
+cached copy of the same key and resetting its replay state. This guard does
+not establish complete replay safety: the host cache is not authoritative
+firmware state and broader protocol validation is still required.
 The current patch has no additional delay. The OpenBSD history does not by
 itself justify adding one.
 
 This is an experimental recovery path, not an upstream fix. It currently
-triggers on any installation error satisfying those conditions and is not
+triggers on any firmware rejection satisfying those conditions and is not
 restricted by chip or firmware version. Before broader use, review error
 selection, device scoping, failure handling, and key/replay-state behavior.
 Clearing a key is state-changing; if recovery fails, connectivity can still
@@ -171,6 +195,51 @@ the experimental boot therefore selects stock, even if SSH was lost.
 These mechanisms reduce lockout risk; they cannot guarantee recovery from
 every hard hang or power/storage fault. No router security settings need to
 be weakened for the experiment.
+
+### Comparing another access point
+
+Start with the distribution driver and the same firmware, kernel, module
+options, and power-save setting. Record the active access point using private
+local notes, and give it an anonymous label in any shared results. Also record
+signal, channel, negotiated security/cipher, and association/reboot times.
+Moving the device changes radio conditions as well as the access point, so
+distinguish improved reachability from successful key replacement.
+
+Observe at least two actual group rekeys in one association, preferably
+several complete alternations of the GTK indices. A hotspot that does not
+rotate its GTK is useful as a connectivity comparison but does not exercise
+the reproduced replacement failure. Twenty minutes alone is not a universal
+test duration: the other access point may use a different rekey interval.
+Check sustained traffic across rotations as well as successful return codes;
+ordinary unicast ping alone does not demonstrate that group-key decryption
+works. Keep stock-driver access-point comparison separate from a later retry
+candidate comparison on the original access point.
+
+### Reading firmware errors on the stock driver
+
+`scripts/trace-stock-firmware-errors.sh` uses a private tracefs instance and
+temporary kprobes on the verified ARM64 kernel ABI. It captures key index and
+pairwise/group classification, key-operation return codes, and only the
+specific numeric firmware-error message from `brcmf_fil_cmd_data`. It does not
+enable the driver's FIL debug mask: that mask also enables data hexdumps that
+can expose key material. No key buffers or sequence counters are fetched by
+this script. Static function and format strings identify the filtered error.
+
+Run it as a bounded, detached diagnostic when SSH itself uses Wi-Fi:
+
+```sh
+sudo systemd-run --unit=gtk-stock-fwerr --collect \
+  --property=RuntimeMaxSec=1560 \
+  /bin/bash /absolute/path/to/scripts/trace-stock-firmware-errors.sh 1500
+journalctl -u gtk-stock-fwerr --no-pager
+```
+
+The script prints its buffer when the requested duration ends and removes its
+own probes and trace instance on exit or termination. It does not unload the
+driver or change Wi-Fi settings. Trace timestamps are monotonic; compare them
+with `journalctl -k -b -o short-monotonic`. Routine unrelated operations can
+also return firmware errors, so correlate the same task's key-add event,
+firmware error, and key return value before attributing a code to a GTK.
 
 ## Building
 

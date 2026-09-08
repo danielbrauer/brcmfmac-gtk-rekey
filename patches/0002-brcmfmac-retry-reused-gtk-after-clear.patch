@@ -1,19 +1,16 @@
 From: brcmfmac GTK rekey experiments <noreply@example.invalid>
-Subject: [PATCH 2/2] wifi: brcmfmac: retry reused GTK slot after clear
+Subject: [PATCH 2/2] wifi: brcmfmac: retry changed GTK after firmware rejection
 
-If direct replacement of an occupied CCMP group-key slot fails, clear only
-that slot using the driver's existing deletion representation and retry the
-requested installation once. Do not alter initial, pairwise, successful, or
-non-CCMP key operations.
+After firmware rejection of a changed CCMP group key in a used slot,
+clear that slot and retry once. Exclude identical cached keys, transport
+errors, initial installs, pairwise keys and non-CCMP keys.
 
 ---
- drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c | 17 +++++++++++++++++
- 1 file changed, 17 insertions(+)
 
 diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
 --- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
 +++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
-@@ -2818,6 +2818,7 @@ brcmf_cfg80211_add_key(struct wiphy *wiphy, struct net_device *ndev,
+@@ -2818,6 +2818,7 @@
  	struct brcmf_cfg80211_info *cfg = wiphy_to_cfg(wiphy);
  	struct brcmf_if *ifp = netdev_priv(ndev);
  	struct brcmf_pub *drvr = cfg->pub;
@@ -21,16 +18,13 @@ diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c b/drive
  	struct brcmf_wsec_key *key;
  	s32 val;
  	s32 wsec;
-@@ -2918,6 +2919,22 @@ brcmf_cfg80211_add_key(struct wiphy *wiphy, struct net_device *ndev,
- 		   params->seq_len);
+@@ -2927,6 +2928,19 @@
+ 		   params->cipher, params->seq_len, seq_zero);
  
  	err = send_key_to_dongle(ifp, key);
-+	if (err && !pairwise && replacing &&
++	if (err == -EBADE && !pairwise && replacing && !same_ccmp_key &&
 +	    params->cipher == WLAN_CIPHER_SUITE_CCMP) {
-+		/*
-+		 * Some BCM43430 firmware rejects replacing an occupied GTK slot.
-+		 * Clear only that group-key slot, then retry the requested key once.
-+		 */
++		/* Test recovery only for firmware rejection of a changed GTK. */
 +		memset(&clear_key, 0, sizeof(clear_key));
 +		clear_key.index = key_idx;
 +		clear_key.flags = BRCMF_PRIMARY_KEY;
@@ -44,5 +38,3 @@ diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c b/drive
  	if (ext_key || err)
  		goto done;
  
--- 
-2.51.0
