@@ -439,6 +439,14 @@ sudo ./scripts/arm-one-boot-test.sh /absolute/path/to/brcmfmac-trace.ko 45
 sudo systemctl reboot
 ```
 
+The loader serializes concurrent udev requests with a file lock and checks
+whether the module is already loaded before consuming the marker. A live
+attempt exposed why this matters: consuming the marker alone allowed another
+worker to load stock while the first inserted the candidate, which failed
+with `File exists`. That attempt booted stock and did not test the retry
+patch. The isolated loader tests cover concurrent requests, option forwarding,
+failed insertion, and return to stock on the following boot.
+
 The generated `modprobe` rule atomically consumes a one-shot marker before it
 inserts the candidate. Any later boot therefore loads the distribution module,
 even if the candidate causes an immediate crash. A boot timer removes the rule

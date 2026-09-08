@@ -25,6 +25,7 @@ jobs:
           grep -Fq '$CMDLINE_OPTS' scripts/arm-one-boot-test.sh
           python3 scripts/test-eapol-metadata.py
           python3 scripts/test-group-traffic.py
+          python3 scripts/test-one-boot-loader.py
 
       - name: Install build dependencies
         run: |
