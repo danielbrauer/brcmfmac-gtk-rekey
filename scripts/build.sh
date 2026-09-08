@@ -23,7 +23,8 @@ work_root="${RUNNER_TEMP:-$repo_root/build}/brcmfmac-${variant}"
 package_root="$work_root/packages"
 sysroot="$work_root/sysroot"
 source_root="$work_root/linux"
-module_dir="$source_root/drivers/net/wireless/broadcom/brcm80211/brcmfmac"
+driver_dir="$source_root/drivers/net/wireless/broadcom/brcm80211"
+module_file="$driver_dir/brcmfmac/brcmfmac.ko"
 output_dir="$repo_root/dist/$variant"
 
 rm -rf "$work_root" "$output_dir"
@@ -51,8 +52,8 @@ fi
 make -C "$source_root" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
 make -C "$source_root" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules_prepare
 make -C "$source_root" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-  M="$module_dir" modules
+  M="$driver_dir" modules
 
-cp "$module_dir/brcmfmac.ko" "$output_dir/brcmfmac-${variant}.ko"
+cp "$module_file" "$output_dir/brcmfmac-${variant}.ko"
 printf '%s\n' "$kernel_release" > "$output_dir/kernel-release.txt"
 sha256sum "$output_dir/brcmfmac-${variant}.ko" > "$output_dir/SHA256SUMS"
