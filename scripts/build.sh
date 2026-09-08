@@ -9,6 +9,7 @@ case "$variant" in
 esac
 
 kernel_version="6.18.39"
+source_series="6.18"
 package_version="6.18.39-1+rpt1"
 kernel_release="6.18.39+rpt-rpi-v8"
 archive_base="https://archive.raspberrypi.com/debian/pool/main/l/linux"
@@ -35,7 +36,7 @@ printf '%s  %s\n' "$headers_sha256" "$package_root/$headers_deb" | sha256sum -c 
 
 dpkg-deb -x "$package_root/$source_deb" "$sysroot"
 dpkg-deb -x "$package_root/$headers_deb" "$sysroot"
-tar -xf "$sysroot/usr/src/linux-source-${kernel_version}.tar.xz" \
+tar -xf "$sysroot/usr/src/linux-source-${source_series}.tar.xz" \
   -C "$source_root" --strip-components=1
 
 headers_root="$sysroot/usr/src/linux-headers-$kernel_release"
