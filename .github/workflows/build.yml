@@ -26,6 +26,7 @@ jobs:
           python3 scripts/test-eapol-metadata.py
           python3 scripts/test-group-traffic.py
           python3 scripts/test-one-boot-loader.py
+          python3 scripts/test-persistent-module.py
 
       - name: Install build dependencies
         run: |

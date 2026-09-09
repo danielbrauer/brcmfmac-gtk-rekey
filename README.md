@@ -49,9 +49,9 @@ general fix or complete replay-security validation. Each local timer restored
 stock afterward, and normal rekey failures resumed. No permanent installation
 was made; temporary loaders and probes were removed, and observers finished.
 
-The modules are built as temporary test artifacts. They should be loaded from
-a staging directory without replacing the distribution module. A reboot must
-continue to load the untouched stock driver.
+The bounded test loaders restore the distribution driver. The explicit
+persistent installer below can instead retain the exact tested artifact
+across reboots, while preserving the distribution module for removal.
 
 ## Investigation and mitigation
 
@@ -456,7 +456,7 @@ state or over-the-air rejection of captured frames.
 Both the earlier prototype and the current scoped revision demonstrated
 repeated recovery and group traffic delivery in bounded live tests. Explicit
 replay-resistance validation remains separate from connectivity success. No
-permanent installation is made by the build or test scripts. The distribution module stays available for rollback.
+permanent installation is made by the build or temporary test scripts. The distribution module stays available for rollback.
 A working-access-point comparison is optional for understanding the trigger.
 Keep all logs free of key material and network identifiers.
 
@@ -605,6 +605,57 @@ If a crash already caused a second, stock-driver boot, the timer only cleans up
 the test files and does not reboot again. Kernel options appended by `modprobe`
 are forwarded unchanged to the candidate through modprobe's `CMDLINE_OPTS`
 substitution.
+
+## Persistent installation of the tested artifact
+
+`scripts/manage-persistent-module.sh` installs only the exact module from the
+scoped live test above: kernel `6.18.39+rpt-rpi-v8`, artifact SHA-256
+`13421cc55747df027a15a5d373d3ca1bce6a45179a682952f2db3a80cefdbf3c`.
+It checks the checksum, kernel ABI and source version before making changes.
+A newly built artifact, even from the same source, requires separate validation;
+it is not automatically accepted by this installer.
+
+```sh
+sudo ./scripts/manage-persistent-module.sh install /absolute/path/to/brcmfmac-retry.ko
+sudo systemctl reboot
+```
+
+The installer puts the module in
+`/lib/modules/6.18.39+rpt-rpi-v8/updates/gtk-rekey/brcmfmac.ko`, regenerates
+module dependencies and the initramfs, and preserves the distribution module
+under `kernel/`. Existing modprobe options continue to apply. It does not
+change firmware, network configuration or the currently loaded driver.
+
+The first reboot has a **15-minute automatic rollback guard**. After verifying
+SSH, the loaded module and application services, confirm the installation:
+
+```sh
+sudo /usr/local/libexec/brcmfmac-gtk-rekey/manage-persistent-module confirm
+```
+
+Confirmation requires the tested module's source version to be loaded, the
+installed checksum to match, and module selection to resolve to the override.
+It then removes the installation rollback timer. If unconfirmed, the local
+timer removes the override, regenerates dependencies and the boot image, and
+reboots into stock. This guard depends on the system remaining able to run
+its local timer; it does not guarantee recovery from every hard hang.
+
+To remove the persistent patch later:
+
+```sh
+sudo /usr/local/libexec/brcmfmac-gtk-rekey/manage-persistent-module remove --reboot
+```
+
+Removal refuses to delete a module whose checksum no longer matches this
+installer. The root-owned helper remains available after confirmation. Six
+isolated installer tests cover artifact rejection, next-boot timer arming,
+loaded-module confirmation, rollback, boot-image update failure, and refusal
+to remove an unrelated replacement.
+
+This installation applies only to the pinned kernel release. A different
+kernel loads its distribution module, so rekey failures may return after a
+kernel upgrade until a matching patch is built, tested and installed. The
+installer does not hold kernel or firmware package updates.
 
 ## Privacy
 
