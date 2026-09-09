@@ -34,10 +34,12 @@ Research prototype. A live `trace` test reproduced failure when an occupied
 GTK slot was reused. A subsequent stock-driver probe identified the firmware
 rejection as **`BCME_REPLAY` (-51)**. An expanded trace then reproduced it with
 a changed key and an advancing EAPOL-Key Replay Counter, strongly suggesting
-a false replay rejection during replacement. The `retry` variant has been
-built by CI but has **not been deployed or demonstrated to fix the problem**.
-The completed trace tests were cleaned up and the target returned to its
-untouched stock driver, with normal options and control services verified.
+a false replay rejection during replacement. A bounded `retry` test then
+completed **five group rotations without reassociation**, recovering two
+`BCME_REPLAY` rejections while group traffic continued. This demonstrates a
+workaround on the tested configuration, not a general fix or complete replay-
+security validation. The timer restored stock afterward; normal rekey failures
+resumed. All temporary loaders, probes and observers were removed or finished.
 
 The modules are built as temporary test artifacts. They should be loaded from
 a staging directory without replacing the distribution module. A reboot must
@@ -176,6 +178,69 @@ fails to express the required transition, remains unproven. Reusing a Key ID
 and supplying zero receive state for a fresh unused key are permitted; see
 the specification discussion below. No clear-and-retry recovery was active.
 
+### Bounded retry result
+
+The retry artifact built from `55d1ffa` was loaded with the serialized loader
+from `8d8a68b`, unchanged firmware, and normal module options. Its SHA-256 is
+`6a7dca0c02c2e15c6373b950a8cd6fe6588949b27430785e77f3c4a16145d8c6`.
+The candidate associated at 23:33:24 on 2026-09-08; all times below are
+UTC+02:00, with the last two rotations on 2026-09-09.
+
+| Group rotation | Time | Index | Occupied | Result |
+| --- | --- | --- | --- | --- |
+| First | 23:34:37 | 2 | No | Direct install succeeded |
+| Second | 23:44:37 | 1 | Yes | BCME_REPLAY; clear succeeded; retry succeeded |
+| Third | 23:54:37 | 2 | Yes | Direct replacement succeeded |
+| Fourth | 00:04:37 | 1 | Yes | BCME_REPLAY; clear succeeded; retry succeeded |
+| Fifth | 00:14:37 | 2 | Yes | Direct replacement succeeded |
+
+Both recovered requests contained a changed CCMP key and a supplied zero
+receive sequence. Firmware returned -51 and the host -52 before each clear;
+clear and retry each returned 0. Each complete add/clear/retry sequence took
+about 3.1 ms. The supplicant reported all five rekeys complete. No reconnect
+or firmware crash occurred during the test; the only disconnect was the
+planned stock-restoration shutdown at 00:18:26.
+
+The EAPOL observer began after the first rotation. Its next observed group
+request established the baseline, and all three subsequent replay counters
+increased in that same observed session. All four observed requests carried
+zero Key RSC. The observer recorded no new pairwise handshake during the run.
+
+A local-gateway check received **2,100 of 2,100 replies (0% loss)**, spanning
+both recovery events and the intervening direct replacement. It finished at
+00:13:56, so it does not cover the fifth rotation. The passive Ethernet-header
+observer continued until 00:16:39 and confirmed group delivery after that
+rotation too. Counts below exclude windows that straddle a rotation; reporting intervals
+are about 30 seconds, with a shorter final interval at observer shutdown:
+
+| After rotation | Measurement windows | Broadcast frames | Multicast frames |
+| --- | --- | --- | --- |
+| Second, recovered | 19 | 578 | 674 |
+| Third, direct | 19 | 586 | 471 |
+| Fourth, recovered | 19 | 582 | 421 |
+| Fifth, direct | 4 | 117 | 148 |
+
+These results demonstrate sustained delivered group traffic, not an over-the-
+air replay-resistance test. The host-function harness separately verifies the
+retry exclusions and receive-state preservation using synthetic keys and a
+recording firmware stub. Neither establishes the proprietary firmware's
+complete security behavior.
+
+The rejection stayed with the association's initial GTK slot, which initially
+received a nonzero sequence. It recurred in that slot even after clear/retry
+had successfully installed a zero-sequence key. The other occupied slot
+accepted replacements directly. Thus occupancy alone is insufficient, and
+clearing did not permanently normalize the initially affected slot. The
+firmware state responsible remains unknown; numeric slot 1 is not inherently
+special, because earlier associations failed on slot 2.
+
+The local timer cleaned up and rebooted at 00:18. Stock-driver rekey failures
+resumed at 00:34:37 and repeated every twenty minutes. Verification the next
+morning found stock loaded, normal options, power saving off, services active,
+and no test loader, probes or running observers. Loss of the remote observer's
+SSH access overnight was not a Pi disconnect: the Pi's local logs preserve the
+uninterrupted candidate association and full test results.
+
 ### Guidance from other implementations and public history
 
 - **OpenBSD `bwfm`:** the 100 microsecond delay immediately before setting
@@ -308,13 +373,14 @@ be lost. Successful return codes alone will not demonstrate correct traffic
 decryption or security behavior.
 
 The expanded trace establishes a changed key and advancing handshake counter
-at the rejection. Next compare the stock driver across access points and
-review the replacement command's replay-state semantics. Do not treat
-clearing the slot and obtaining a successful return as a validated fix for a
-replay rejection. Replay protection must remain correct. Any later candidate
-test must hold kernel, firmware and module options constant, observe repeated reuse of
-both GTK slots, and verify sustained group traffic as well as key-install
-outcomes. Keep all logs free of key material and network identifiers.
+at the rejection. The bounded retry test now demonstrates repeated recovery
+and sustained group delivery on this configuration. Before permanent or
+broader deployment, narrow the error/chip/firmware scope and review the
+replacement command's replay-state semantics. A working-access-point
+comparison is optional for understanding the trigger, not a prerequisite for
+this demonstrated recovery. Longer testing and explicit replay-resistance
+validation remain distinct from connectivity success. Keep all logs free of
+key material and network identifiers.
 
 ### Recovery constraints
 
