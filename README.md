@@ -35,16 +35,19 @@ Research prototype. A live `trace` test reproduced failure when an occupied
 GTK slot was reused. A subsequent stock-driver probe identified the firmware
 rejection as **`BCME_REPLAY` (-51)**. An expanded trace then reproduced it with
 a changed key and an advancing EAPOL-Key Replay Counter, strongly suggesting
-a false replay rejection during replacement. A bounded `retry` test then
-completed **five group rotations without reassociation**, recovering two
-`BCME_REPLAY` rejections while group traffic continued. This demonstrates a
-workaround on the tested configuration, not a general fix or complete replay-
-security validation. The timer restored stock afterward; normal rekey failures
-resumed. All temporary loaders, probes and observers were removed or finished.
-The current revision narrows that tested prototype by exact firmware error,
-chip/revision/build and interface type, and excludes matches across all cached
-CCMP keys. That revision requires its own live confirmation; the five-rotation
-result above belongs to the earlier artifact identified below.
+a false replay rejection during replacement.
+
+The current scoped patch from `573d3dd` completed **four group rotations
+without reassociation**, recovering two `BCME_REPLAY` rejections while group
+traffic continued. It matches the exact firmware error, chip/revision/build
+and interface type, and excludes matches across all cached CCMP keys. The
+earlier, broader prototype separately completed five rotations. Artifacts
+and results for both runs are identified below.
+
+These tests demonstrate a workaround on the tested configuration, not a
+general fix or complete replay-security validation. Each local timer restored
+stock afterward, and normal rekey failures resumed. No permanent installation
+was made; temporary loaders and probes were removed, and observers finished.
 
 The modules are built as temporary test artifacts. They should be loaded from
 a staging directory without replacing the distribution module. A reboot must
@@ -246,6 +249,63 @@ and no test loader, probes or running observers. Loss of the remote observer's
 SSH access overnight was not a Pi disconnect: the Pi's local logs preserve the
 uninterrupted candidate association and full test results.
 
+### Scoped-patch live result
+
+The narrowed patch from `573d3dd` was tested on 2026-09-09 with the same
+BCM43430/2 firmware build `01-3b307371`, exact kernel ABI, normal module
+options and power saving off. The candidate's SHA-256 is
+`13421cc55747df027a15a5d373d3ca1bce6a45179a682952f2db3a80cefdbf3c`.
+It associated at 11:08:00, initially installing GTK index 1 with a nonzero
+receive sequence. Times are UTC+02:00.
+
+| Group rotation | Time | Index | Occupied | Result |
+| --- | --- | --- | --- | --- |
+| First | 11:16:09 | 2 | No | Direct install succeeded |
+| Second | 11:26:09 | 1 | Yes | BCME_REPLAY; clear succeeded; retry succeeded |
+| Third | 11:36:09 | 2 | Yes | Direct replacement succeeded |
+| Fourth | 11:46:09 | 1 | Yes | BCME_REPLAY; clear succeeded; retry succeeded |
+
+Both recovered requests contained a changed key and supplied zero receive
+sequence. In the same supplicant task, the firmware returned -51 and the first
+key operation returned -52; clear and retry each returned 0. The complete
+sequences took about 3.5 ms and 3.1 ms respectively. The supplicant reported
+all four rekeys complete. No reassociation or firmware crash occurred during
+the candidate connection; its only disconnect was the planned rollback
+shutdown at 11:52:55.
+
+The passive EAPOL observer recorded four group requests in one observed
+session. The first established its replay-counter baseline, and all three
+subsequent counters increased. All four carried zero Key RSC, and no new
+pairwise handshake was observed. The firmware trace retained all 412 written
+events through its scheduled finish at 11:48:52.
+
+A gateway check spanning all four rotations received **2,392 of 2,400 replies
+(0.33% loss)** and finished at 11:48:55. Its aggregate-only output does not
+locate the eight missing replies relative to rekeys, so it cannot establish
+that recovery was lossless or caused those losses. The passive group observer
+continued through 11:48 and recorded delivered traffic after every rotation:
+
+| After rotation | Measurement windows | Broadcast frames | Multicast frames |
+| --- | --- | --- | --- |
+| First, direct | 19 | 570 | 346 |
+| Second, recovered | 19 | 585 | 784 |
+| Third, direct | 19 | 580 | 281 |
+| Fourth, recovered | 5 | 148 | 68 |
+
+Counts exclude windows straddling a rotation. Intervals are approximately
+30 seconds, with a shorter final interval when the observer finished. These
+results confirm that the scoped eligibility checks match the target and
+permit repeated recovery while group delivery continues. They do not establish
+the proprietary firmware's complete replay-security behavior.
+
+The local cleanup timer ran at 11:52:47 and initiated stock restoration.
+Subsequent verification found stock loaded, normal options, debug mask zero,
+power saving off, control/watchdog services active, no test loader or timer,
+no remaining probes, and all observers finished. Only the inert loader lock
+file remains. Stock rekey failures resumed at 12:06:09 and repeated every
+twenty minutes. SSH key-signing stalls on the observing Mac delayed collection;
+the Pi retained the complete test independently.
+
 ### Guidance from other implementations and public history
 
 - **OpenBSD `bwfm`:** the 100 microsecond delay immediately before setting
@@ -393,11 +453,10 @@ of existing return modes. The build also checks kernel patch style. These
 checks test host behavior, not the proprietary firmware's internal replay
 state or over-the-air rejection of captured frames.
 
-The earlier bounded prototype test demonstrated repeated recovery and group
-traffic delivery. The current scoped revision still needs live confirmation
-of its match on the target, and explicit replay-resistance validation remains
-separate from connectivity success. No permanent installation is made by the
-build or test scripts. The distribution module stays available for rollback.
+Both the earlier prototype and the current scoped revision demonstrated
+repeated recovery and group traffic delivery in bounded live tests. Explicit
+replay-resistance validation remains separate from connectivity success. No
+permanent installation is made by the build or test scripts. The distribution module stays available for rollback.
 A working-access-point comparison is optional for understanding the trigger.
 Keep all logs free of key material and network identifiers.
 
