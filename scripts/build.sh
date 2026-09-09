@@ -50,6 +50,9 @@ git -C "$source_root" apply "$repo_root/patches/0001-brcmfmac-trace-key-slot-reu
 if [[ "$variant" == retry ]]; then
   git -C "$source_root" apply "$repo_root/patches/0002-brcmfmac-retry-reused-gtk-after-clear.patch"
   python3 "$repo_root/scripts/test-key-recovery.py" "$driver_dir/brcmfmac/cfg80211.c"
+  python3 "$repo_root/scripts/test-firmware-status.py" "$driver_dir/brcmfmac/fwil.c"
+  perl "$source_root/scripts/checkpatch.pl" --patch --strict --no-tree --no-signoff \
+    "$repo_root/patches/0002-brcmfmac-retry-reused-gtk-after-clear.patch"
 fi
 
 make -C "$source_root" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \

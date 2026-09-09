@@ -6,7 +6,7 @@ import sys
 import tempfile
 
 source = Path(sys.argv[1]).read_text()
-start = source.index("static s32\nbrcmf_cfg80211_add_key(")
+start = source.index("static bool brcmf_gtk_replay_recovery_allowed(")
 end = source.index("\nstatic s32\nbrcmf_cfg80211_get_key(", start)
 function = source[start:end]
 preamble = r'''
@@ -25,6 +25,11 @@ typedef int32_t s32;
 #define ETH_ALEN 6
 #define BRCMF_MAX_DEFAULT_KEYS 6
 #define BRCMF_PRIMARY_KEY 2
+#define BRCM_CC_43430_CHIP_ID 43430
+#define BRCMF_FWERR_REPLAY (-51)
+#define NL80211_IFTYPE_STATION 2
+#define NL80211_IFTYPE_AP 3
+#define NL80211_IFTYPE_P2P_CLIENT 8
 #define CRYPTO_ALGO_OFF 0
 #define CRYPTO_ALGO_WEP1 1
 #define CRYPTO_ALGO_TKIP 2
@@ -46,16 +51,18 @@ struct brcmf_wsec_key {
     u8 data[32], ea[6];
     struct { u32 hi; unsigned short lo; } rxiv;
 };
-struct brcmf_pub { int unused; };
+struct brcmf_bus { u32 chip, chiprev; };
+struct brcmf_pub { struct brcmf_bus *bus_if; const char *fwver; };
 struct brcmf_profile { struct brcmf_wsec_key key[6]; };
-struct brcmf_vif { struct brcmf_profile profile; };
-struct brcmf_if { struct brcmf_vif *vif; };
+struct brcmf_vif { struct brcmf_profile profile; struct { int iftype; } wdev; };
+struct brcmf_if { struct brcmf_vif *vif; struct brcmf_pub *drvr; };
 struct brcmf_cfg80211_info { struct brcmf_pub *pub; };
 struct wiphy { struct brcmf_cfg80211_info *cfg; };
 struct net_device { struct brcmf_if *ifp; };
 struct key_params { int key_len, seq_len; u32 cipher; const u8 *key, *seq; };
 static struct brcmf_wsec_key calls[4];
-static int results[4], count;
+static int results[4], firmware_results[4], count;
+static bool status_requested[4];
 static struct brcmf_cfg80211_info *wiphy_to_cfg(struct wiphy *w) { return w->cfg; }
 static struct brcmf_if *netdev_priv(struct net_device *n) { return n->ifp; }
 static bool check_vif_up(struct brcmf_vif *v) { return true; }
@@ -68,8 +75,11 @@ static int brcmf_cfg80211_del_key(struct wiphy *w, struct net_device *n,
                                 int link, u8 index, bool pairwise, const u8 *mac) {
     return -EINVAL;
 }
-static int send_key_to_dongle(struct brcmf_if *ifp, struct brcmf_wsec_key *key) {
-    assert(count < 4); calls[count] = *key; return results[count++];
+static int send_key_to_dongle(struct brcmf_if *ifp, struct brcmf_wsec_key *key, s32 *fwerr) {
+    assert(count < 4); calls[count] = *key;
+    status_requested[count] = fwerr != NULL;
+    if (fwerr) *fwerr = firmware_results[count];
+    return results[count++];
 }
 static int brcmf_fil_bsscfg_int_get(struct brcmf_if *i, const char *name, s32 *v) {
     *v = 0; return 0;
@@ -82,12 +92,20 @@ tests = r'''
 int main(void) {
     const char *names[] = {"changed", "success", "identical", "pairwise", "unused",
                          "transport-error", "non-CCMP", "clear-failure", "retry-failure",
-                         "nonzero-receive-sequence"};
-    for (int test = 0; test < 10; ++test) {
+                         "nonzero-receive-sequence", "wrong-chip", "wrong-revision", "wrong-firmware",
+                         "AP-mode", "P2P-client", "other-firmware-error", "transport-EBADE",
+                         "missing-sequence", "invalid-sequence-length", "old-non-CCMP",
+                         "old-wrong-key-length", "old-pairwise-slot", "new-wrong-key-length",
+                         "identical-other-group-slot", "identical-pairwise-slot",
+                         "matching-prefix-different-length", "different-other-cached-key",
+                         "extended-key", "invalid-index", "oversize-key"};
+    for (int test = 0; test < 30; ++test) {
         struct brcmf_vif vif = {0};
-        struct brcmf_pub pub = {0};
+        struct brcmf_bus bus = {.chip=BRCM_CC_43430_CHIP_ID, .chiprev=2};
+        struct brcmf_pub pub = {.bus_if=&bus, .fwver="01-3b307371"};
+        vif.wdev.iftype = NL80211_IFTYPE_STATION;
         struct brcmf_cfg80211_info cfg = { .pub = &pub };
-        struct brcmf_if ifp = { .vif = &vif };
+        struct brcmf_if ifp = { .vif = &vif, .drvr = &pub };
         struct wiphy w = { .cfg = &cfg };
         struct net_device n = { .ifp = &ifp };
         u8 key[32], sequence[6] = {0};
@@ -95,12 +113,17 @@ int main(void) {
         struct key_params params = {.key_len=16, .seq_len=6,
                                     .cipher=WLAN_CIPHER_SUITE_CCMP, .key=key, .seq=sequence};
         struct brcmf_wsec_key *old = &vif.profile.key[2];
-        old->algo = CRYPTO_ALGO_AES_CCM; old->len = 16;
+        old->algo = CRYPTO_ALGO_AES_CCM; old->len = 16; old->flags = BRCMF_PRIMARY_KEY;
         memset(old->data, 0x41, old->len);
         memset(calls, 0, sizeof(calls)); memset(results, 0, sizeof(results));
-        count = 0; results[0] = -EBADE;
+        memset(firmware_results, 0, sizeof(firmware_results));
+        memset(status_requested, 0, sizeof(status_requested));
+        count = 0; results[0] = -EBADE; firmware_results[0] = BRCMF_FWERR_REPLAY;
         int expected_calls = 3, expected_result = 0;
         bool pairwise = false;
+        const u8 *mac = NULL;
+        u8 synthetic_mac[6] = {2, 0, 0, 0, 0, 1};
+        u8 index = 2;
         if (test == 1) { results[0] = 0; expected_calls = 1; }
         if (test == 2) { memcpy(old->data, key, 16); expected_calls = 1; expected_result = -EBADE; }
         if (test == 3) { pairwise = true; expected_calls = 1; expected_result = -EBADE; }
@@ -111,10 +134,38 @@ int main(void) {
         if (test == 7) { results[1] = -EIO; expected_calls = 2; expected_result = -EIO; }
         if (test == 8) { results[2] = -EBADE; expected_result = -EBADE; }
         if (test == 9) { for (int j=0;j<6;++j) sequence[j] = j + 1; }
-        int result = brcmf_cfg80211_add_key(&w, &n, -1, 2, pairwise, NULL, &params);
+        if (test >= 10) { expected_calls = 1; expected_result = -EBADE; }
+        if (test == 10) bus.chip++;
+        if (test == 11) bus.chiprev++;
+        if (test == 12) pub.fwver = "01-3b307371-extra";
+        if (test == 13) vif.wdev.iftype = NL80211_IFTYPE_AP;
+        if (test == 14) vif.wdev.iftype = NL80211_IFTYPE_P2P_CLIENT;
+        if (test == 15) firmware_results[0] = -23;
+        if (test == 16) firmware_results[0] = 0;
+        if (test == 17) params.seq = NULL;
+        if (test == 18) params.seq_len = 5;
+        if (test == 19) old->algo = CRYPTO_ALGO_TKIP;
+        if (test == 20) old->len = 15;
+        if (test == 21) old->flags = 0;
+        if (test == 22) params.key_len = 15;
+        if (test >= 23 && test <= 26) {
+            struct brcmf_wsec_key *other = &vif.profile.key[0];
+            other->algo = CRYPTO_ALGO_AES_CCM;
+            other->len = test == 25 ? 32 : 16;
+            other->flags = test == 24 ? 0 : BRCMF_PRIMARY_KEY;
+            memcpy(other->data, key, 16);
+            if (test == 26) other->data[0]++;
+            if (test >= 25) { expected_calls = 3; expected_result = 0; }
+        }
+        if (test == 27) mac = synthetic_mac;
+        if (test == 28) { index = BRCMF_MAX_DEFAULT_KEYS; expected_calls = 0; expected_result = -EINVAL; }
+        if (test == 29) { params.key_len = 33; expected_calls = 0; expected_result = -EINVAL; }
+        int result = brcmf_cfg80211_add_key(&w, &n, -1, index, pairwise, mac, &params);
         if (result != expected_result || count != expected_calls) {
             fprintf(stderr, "%s: unexpected result or operation count\n", names[test]); return 1;
         }
+        if (test >= 10 && test <= 14) assert(!status_requested[0]);
+        if (test == 15 || test == 16) assert(status_requested[0]);
         if (count >= 2) {
             assert(calls[1].index == 2 && calls[1].algo == CRYPTO_ALGO_OFF);
             assert(calls[1].flags == BRCMF_PRIMARY_KEY && calls[1].len == 0);
@@ -129,7 +180,7 @@ int main(void) {
             assert(calls[2].rxiv.hi == 0x06050403 && calls[2].rxiv.lo == 0x0201);
         }
     }
-    puts("10 recovery-path tests passed (recording firmware stub)");
+    puts("30 recovery-path tests passed (recording firmware stub)");
     return 0;
 }
 '''

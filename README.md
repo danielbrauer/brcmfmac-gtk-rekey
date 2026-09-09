@@ -21,9 +21,10 @@ package, verifies their SHA-256 digests, and produces two modules:
   length, whether the driver's key slot was already occupied, whether a CCMP
   GTK matches the cached key, and whether the supplied receive sequence is
   zero. Only boolean comparisons are logged, never key or sequence bytes.
-- `retry`: includes the trace and, after firmware rejection of a changed key
-  in an occupied CCMP group-key slot, clears that slot using the driver's
-  existing deletion representation and retries once.
+- `retry`: includes the trace and recovers only an exact `BCME_REPLAY`
+  rejection of an eligible changed CCMP group key on BCM43430 revision 2,
+  firmware build `01-3b307371` (9.88.4.77), in station mode. It clears the
+  selected slot using the existing deletion representation and retries once.
 
 Neither variant logs key bytes, credentials, SSIDs, BSSIDs, MAC addresses, IP
 addresses, or other network configuration.
@@ -40,6 +41,10 @@ completed **five group rotations without reassociation**, recovering two
 workaround on the tested configuration, not a general fix or complete replay-
 security validation. The timer restored stock afterward; normal rekey failures
 resumed. All temporary loaders, probes and observers were removed or finished.
+The current revision narrows that tested prototype by exact firmware error,
+chip/revision/build and interface type, and excludes matches across all cached
+CCMP keys. That revision requires its own live confirmation; the five-rotation
+result above belongs to the earlier artifact identified below.
 
 The modules are built as temporary test artifacts. They should be loaded from
 a staging directory without replacing the distribution module. A reboot must
@@ -344,43 +349,57 @@ key-install path and the driver trace. An observation begun after association
 has no initial-handshake counter baseline. It can still compare consecutive
 group requests; a new observed pairwise handshake starts a new baseline.
 
-### Proposed recovery and remaining work
+### Scoped recovery patch and remaining work
 
-The `retry` patch leaves successful installations unchanged. After firmware
-rejection (`-EBADE`) of a changed key in an occupied CCMP group-key slot, it
-clears just that slot using the existing deletion representation and retries
-the requested key once. Initial installs, pairwise keys, non-CCMP keys,
-transport errors, and keys identical to that slot's cached CCMP key do not
-enter this recovery. The identical-key guard avoids deliberately clearing a
-cached copy of the same key and resetting its replay state. This guard does
-not establish complete replay safety: the host cache is not authoritative
-firmware state and broader protocol validation is still required.
-The retry build also compiles the actual patched `add_key` function against a
-recording firmware stub. Ten cases check changed versus identical keys,
-success without recovery, pairwise/unused/non-CCMP exclusions, transport and
-clear/retry failures, and exact preservation of the requested receive sequence
-across clear-and-retry. This tests host control flow, not firmware replay
-protection or over-the-air decryption.
-The current patch has no additional delay. The OpenBSD history does not by
-itself justify adding one.
+The `retry` patch leaves successful installations alone and attempts recovery
+only when all of the following conditions hold:
 
-This is an experimental recovery path, not an upstream fix. It currently
-triggers on any firmware rejection satisfying those conditions and is not
-restricted by chip or firmware version. Before broader use, review error
-selection, device scoping, failure handling, and key/replay-state behavior.
-Clearing a key is state-changing; if recovery fails, connectivity can still
-be lost. Successful return codes alone will not demonstrate correct traffic
-decryption or security behavior.
+| Condition | Required value |
+| --- | --- |
+| Chip and silicon revision | BCM43430, revision 2 |
+| Firmware build | Exact FWID `01-3b307371`, the tested 9.88.4.77 build |
+| Interface | Station; AP and P2P modes excluded |
+| Request | Non-pairwise, non-extended CCMP GTK, 16 bytes, supplied six-byte receive sequence |
+| Existing target slot | Cached 16-byte CCMP key with the group/default-key flag |
+| Incoming key identity | Different from every cached CCMP key of that length |
+| Failure | Linux `-EBADE` accompanied by the actual firmware status `BCME_REPLAY` (-51) |
 
-The expanded trace establishes a changed key and advancing handshake counter
-at the rejection. The bounded retry test now demonstrates repeated recovery
-and sustained group delivery on this configuration. Before permanent or
-broader deployment, narrow the error/chip/firmware scope and review the
-replacement command's replay-state semantics. A working-access-point
-comparison is optional for understanding the trigger, not a prerequisite for
-this demonstrated recovery. Longer testing and explicit replay-resistance
-validation remain distinct from connectivity success. Keep all logs free of
-key material and network identifiers.
+This kernel stores the final token of the firmware version response in
+`drvr->fwver`, which for the tested firmware is the FWID, not the dotted
+version number. Exact matching also excludes suffixes or unknown builds.
+
+The firmware interface now optionally returns a separate per-call status
+alongside the Linux errno, while holding its existing protocol mutex. Bus,
+transport and request-construction failures clear that output to zero, so
+an unrelated host `-EBADE` cannot masquerade as firmware replay. Existing
+callers retain their previous return convention. The recovery path does not
+toggle the shared `fwil_fwerr` mode or keep a global last-error field.
+
+When eligible, recovery clears only the selected slot and retries the exact
+requested key and receive sequence once. It stops if clearing fails and
+propagates retry failures. Successful recovery logs only the key index.
+There is no added delay, firmware replacement or router configuration change.
+Requests matching a cached key still follow the normal installation path;
+they can never enter this clear-and-retry path. Cache comparison is deliberately
+conservative and includes CCMP keys in other group or pairwise slots.
+
+The build compiles the actual patched `add_key` and eligibility functions
+against a recording firmware stub. Thirty cases cover eligibility, other
+firmware/transport errors, cross-slot key equality, malformed requests,
+clear/retry failures and exact receive-sequence preservation. Twelve further
+cases compile the actual firmware-interface functions against a transport
+stub to verify status separation, early errors, lock release and compatibility
+of existing return modes. The build also checks kernel patch style. These
+checks test host behavior, not the proprietary firmware's internal replay
+state or over-the-air rejection of captured frames.
+
+The earlier bounded prototype test demonstrated repeated recovery and group
+traffic delivery. The current scoped revision still needs live confirmation
+of its match on the target, and explicit replay-resistance validation remains
+separate from connectivity success. No permanent installation is made by the
+build or test scripts. The distribution module stays available for rollback.
+A working-access-point comparison is optional for understanding the trigger.
+Keep all logs free of key material and network identifiers.
 
 ### Recovery constraints
 
