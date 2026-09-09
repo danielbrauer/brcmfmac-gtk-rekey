@@ -46,8 +46,9 @@ and results for both runs are identified below.
 
 These tests demonstrate a workaround on the tested configuration, not a
 general fix or complete replay-security validation. Each local timer restored
-stock afterward, and normal rekey failures resumed. No permanent installation
-was made; temporary loaders and probes were removed, and observers finished.
+stock afterward, and normal rekey failures resumed. The bounded runs left
+stock in place; temporary loaders and probes were removed, and observers
+finished. Persistent installation is a separate explicit step below.
 
 The bounded test loaders restore the distribution driver. The explicit
 persistent installer below can instead retain the exact tested artifact
