@@ -42,7 +42,10 @@ commit has been established, so no speculative Fixes tag or stable
 backport request is included. See upstream/README.md in the preparation
 repository for reproducible checks and remaining submission requirements.
 
-AI assistance was used for investigation, coding, tests and this draft.
+Codex was prompted to diagnose the recurring GTK failures, constrain a
+clear/retry workaround to the reproduced hardware and firmware, port it
+to current sources, and prepare tests and submission materials. It
+assisted with the investigation, implementation, tests and changelogs.
 The patches contain Assisted-by: LLM. This is an unsigned preparation
 artifact awaiting human review and DCO certification; it has not been
 submitted to any mailing list.

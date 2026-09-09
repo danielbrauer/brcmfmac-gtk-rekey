@@ -3,6 +3,14 @@ name: Check upstream RFC
 on:
   push:
     branches: ['codex/upstream-gtk-recovery']
+    paths:
+      - 'upstream/*.patch'
+      - 'upstream/base-commit'
+      - 'upstream/series'
+      - 'upstream/check-build.sh'
+      - 'scripts/test-key-recovery.py'
+      - 'scripts/test-firmware-status.py'
+      - '.github/workflows/upstream.yml'
   workflow_dispatch:
 
 permissions:

@@ -671,5 +671,7 @@ those values.
 
 ## License
 
-The Linux kernel patches are provided under GPL-2.0-only, matching the patched
-kernel source file. Repository build and test scripts are also GPL-2.0-only.
+The original experimental patches and repository build/test scripts are
+provided under GPL-2.0-only. The patched brcmfmac source files have ISC
+license headers, which remain intact. The standalone patches in `upstream/`
+follow those ISC headers; see [their licensing note](upstream/README.md).

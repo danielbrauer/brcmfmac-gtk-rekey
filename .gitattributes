@@ -1,1 +1,2 @@
 patches/*.patch whitespace=-blank-at-eol,-space-before-tab
+upstream/*.patch whitespace=-blank-at-eol,-space-before-tab,-blank-at-eof

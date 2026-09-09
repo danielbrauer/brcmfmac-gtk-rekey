@@ -70,7 +70,7 @@ while IFS= read -r patch; do
 done < "$series_dir/series"
 python3 "$series_dir/../scripts/test-firmware-status.py" "$path/fwil.c" | tee "$results/status-tests.txt"
 python3 "$series_dir/../scripts/test-key-recovery.py" "$path/cfg80211.c" | tee "$results/recovery-tests.txt"
-perl scripts/kernel-doc -none "$path/fwil.c" 2>&1 | tee "$results/kernel-doc.txt"
+PYTHONPATH="$kernel/tools/lib/python" python3 tools/docs/kernel-doc --none "$path/fwil.c" 2>&1 | tee "$results/kernel-doc.txt"
 python3 - "$results" <<'CHECK'
 from pathlib import Path
 import re

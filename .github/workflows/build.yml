@@ -2,6 +2,10 @@ name: Build test modules
 
 on:
   push:
+    paths:
+      - 'patches/**'
+      - 'scripts/**'
+      - '.github/workflows/build.yml'
   pull_request:
   workflow_dispatch:
 

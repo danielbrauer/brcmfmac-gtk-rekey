@@ -86,7 +86,10 @@ threat-model documents. These distinctions must survive revisions:
   `linux-kernel@vger.kernel.org`. Put linux-wireless in To and the other
   relevant recipients in Cc. Refresh this selection against the submission
   base and recent file history; the preparation checkout has shallow history.
-- Both patches pass checkpatch style checks with `--no-signoff`. Full
+- Both patches pass checkpatch style checks with `--no-signoff`, run from
+  the Linux checkout with the mail-patch paths as arguments. Do not run the
+  checker from this artifact repository, where Git can identify the patch
+  containers as tracked source files. Full
   checkpatch must still report the missing human `Signed-off-by` on each
   patch; that is deliberate, not a clean submission check. The workflow
   asserts that no other full-checkpatch errors or warnings remain.
