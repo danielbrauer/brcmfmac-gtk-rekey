@@ -42,8 +42,22 @@ usage, compares diagnostics with the base, checks kernel-doc, applies the
 mail patches with `git am`, and runs the 42 host cases. The resulting configs,
 compiler versions and logs are downloadable workflow artifacts.
 
-Build status is pending until the workflow completes successfully. Reproduce
-on a disposable Linux checkout at the exact base with GCC, a matching cross
+[Validation run 34354808438](https://github.com/danielbrauer/brcmfmac-gtk-rekey/actions/runs/34354808438)
+passed both configurations on the exact two patches in this directory. GCC
+13.3.0 and sparse 0.6.4 built and checked the base and each patch separately.
+The modified units compile with `W=1 KCFLAGS=-Werror` and have zero sparse
+warnings. Neither patch introduces compiler warnings. The arm64 base's full
+`W=1` build has 517 existing `-Woverride-init` warnings in `arch/arm64/kernel/`
+(`sys.c` and `traps.c`); this is not a warning-free whole-kernel claim.
+
+Stack checking found no new functions above 512 bytes or increases among
+those already above that threshold. On x86-64, `send_key_to_dongle` is 528
+bytes both before and after the patches; other reported functions are also
+unchanged. Kernel-doc passes. Full checkpatch reports only the missing human
+sign-off on each patch. A fresh local `git am` application reproduces the
+prepared source exactly and passes `git diff --check`.
+
+Reproduce on a disposable Linux checkout at the exact base with GCC, a matching cross
 compiler where needed, make, bc, bison, flex, libelf/libssl development files,
 sparse, Perl and Python installed:
 
