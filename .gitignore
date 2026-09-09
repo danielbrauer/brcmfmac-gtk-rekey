@@ -8,3 +8,6 @@ dist/
 Module.symvers
 modules.order
 __pycache__/
+
+/upstream/results/
+/kernel/

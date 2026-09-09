@@ -184,6 +184,28 @@ int main(void) {
     return 0;
 }
 '''
+# Match the source ABI in the fixture, leaving extracted kernel code untouched.
+if "struct wireless_dev *wdev" in function:
+    preamble = preamble.replace(
+        "struct net_device { struct brcmf_if *ifp; };",
+        "struct net_device { struct brcmf_if *ifp; };\n"
+        "struct wireless_dev { struct net_device *netdev; };")
+    preamble = preamble.replace(
+        "struct wiphy *w, struct net_device *n,",
+        "struct wiphy *w, struct wireless_dev *n,")
+    tests = tests.replace(
+        "struct net_device n = { .ifp = &ifp };",
+        "struct net_device n = { .ifp = &ifp };\n"
+        "        struct wireless_dev wdev = { .netdev = &n };")
+    tests = tests.replace("brcmf_cfg80211_add_key(&w, &n,",
+                          "brcmf_cfg80211_add_key(&w, &wdev,")
+
+# Only the older diagnostic patch uses this fixture helper.
+if "memchr_inv(" not in function:
+    begin = preamble.index("static const void *memchr_inv(")
+    end = preamble.index("static int brcmf_cfg80211_del_key(", begin)
+    preamble = preamble[:begin] + preamble[end:]
+
 with tempfile.TemporaryDirectory() as directory:
     root = Path(directory)
     c = root / "test.c"

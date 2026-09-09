@@ -1,5 +1,9 @@
 # brcmfmac GTK rekey experiments
 
+A standalone, unsigned mainline RFC is being prepared on
+`codex/upstream-gtk-recovery`; see [the upstream series and submission audit](upstream/README.md).
+It has its own validation workflow and does not change the installed Pi patch.
+
 Experimental Linux `brcmfmac` instrumentation and a narrowly scoped recovery
 for repeated CCMP group-key installation on a Raspberry Pi Zero 2 W.
 

@@ -1,0 +1,54 @@
+name: Check upstream RFC
+
+on:
+  push:
+    branches: ['codex/upstream-gtk-recovery']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            cross: aarch64-linux-gnu-
+            mode: m
+            debug: n
+          - arch: x86_64
+            cross: ''
+            mode: y
+            debug: y
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v5
+        with:
+          repository: torvalds/linux
+          ref: 893e11787f78e43b534e252249ac3fff4d1333f8
+          path: kernel
+          persist-credentials: false
+      - name: Install build and analysis tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes bc bison flex build-essential \
+            gcc-aarch64-linux-gnu libelf-dev libssl-dev sparse
+      - name: Check and build base and each patch
+        env:
+          ARCH: ${{ matrix.arch }}
+          CROSS_COMPILE: ${{ matrix.cross }}
+          DRIVER_MODE: ${{ matrix.mode }}
+          DRIVER_DEBUG: ${{ matrix.debug }}
+        run: bash upstream/check-build.sh kernel
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: upstream-${{ matrix.arch }}-${{ matrix.mode }}-debug-${{ matrix.debug }}
+          path: upstream/results/
+          if-no-files-found: error

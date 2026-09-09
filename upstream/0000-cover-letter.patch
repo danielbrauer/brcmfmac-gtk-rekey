@@ -1,0 +1,63 @@
+From d4be2f5569993d77d8a081e08e83576eaca75864 Mon Sep 17 00:00:00 2001
+From: Daniel Brauer <messagetodaniel@gmail.com>
+Date: Wed, 9 Sep 2026 15:00:57 +0200
+Subject: [RFC PATCH 0/2] wifi: brcmfmac: recover firmware-rejected GTK replacement
+
+This RFC proposes a narrowly scoped workaround for GTK replacement
+failures observed on a Raspberry Pi Zero 2 W, BCM43430/2, with firmware
+9.88.4.77 (FWID 01-3b307371). Ordinary group-key rotation can disconnect
+the station when firmware rejects replacement of an occupied slot with
+BCME_REPLAY. Clearing that slot and retrying once recovered the observed
+failures in bounded tests on the distribution kernel.
+
+Patch 1 adds per-call firmware status without changing legacy callers.
+Patch 2 uses it to gate recovery on the exact firmware error, chip,
+revision, firmware build, key type, old slot contents and a changed key.
+The series excludes the experimental trace instrumentation.
+
+Review is requested on the firmware-specific scope and on whether
+clearing the occupied slot is an acceptable workaround. The host cache
+cannot establish the firmware's complete replay state. Hardware replay
+resistance testing and maintainer/vendor review are still outstanding.
+No over-the-air replay attack has been demonstrated by the investigation.
+
+The recorded hardware tests used 6.18.39+rpt-rpi-v8 and the equivalent
+scoped backport. Four ten-minute rotations completed, including two
+recoveries, without reassociation before planned rollback. Broadcast and
+multicast traffic was observed after every rotation. Ping received
+2392/2400 replies across the capture; those eight losses cannot be placed
+relative to the recovery events. A stock-driver retest failed again.
+This mainline port has not been run on hardware.
+
+Reproduction requires the affected firmware in station mode on a WPA2
+CCMP network with periodic GTK rotation. Associate, then observe enough
+rotations to replace both occupied group-key slots. The failing request
+uses changed key material and a valid receive sequence; the captured
+rekey EAPOL counters advance. The initially used slot failed on reuse in
+the observed setup. A different access point may not reproduce it.
+
+The base is pinned mainline commit 893e11787f78, rather than a claim of
+runtime validation on mainline or wireless-next. No introducing Linux
+commit has been established, so no speculative Fixes tag or stable
+backport request is included. See upstream/README.md in the preparation
+repository for reproducible checks and remaining submission requirements.
+
+AI assistance was used for investigation, coding, tests and this draft.
+The patches contain Assisted-by: LLM. This is an unsigned preparation
+artifact awaiting human review and DCO certification; it has not been
+submitted to any mailing list.
+
+Daniel Brauer (2):
+  wifi: brcmfmac: expose per-call firmware status for bsscfg writes
+  wifi: brcmfmac: recover rejected GTK replacement on BCM43430/2
+
+ .../broadcom/brcm80211/brcmfmac/cfg80211.c    | 63 ++++++++++++++++---
+ .../broadcom/brcm80211/brcmfmac/fwil.c        | 60 ++++++++++++++----
+ .../broadcom/brcm80211/brcmfmac/fwil.h        |  4 ++
+ 3 files changed, 107 insertions(+), 20 deletions(-)
+
+
+base-commit: 893e11787f78e43b534e252249ac3fff4d1333f8
+-- 
+2.50.1 (Apple Git-155)
+

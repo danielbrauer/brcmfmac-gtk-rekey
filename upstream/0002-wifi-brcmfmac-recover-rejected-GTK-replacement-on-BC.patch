@@ -1,0 +1,198 @@
+From d4be2f5569993d77d8a081e08e83576eaca75864 Mon Sep 17 00:00:00 2001
+From: Daniel Brauer <messagetodaniel@gmail.com>
+Date: Wed, 9 Sep 2026 15:00:57 +0200
+Subject: [RFC PATCH 2/2] wifi: brcmfmac: recover rejected GTK replacement on
+ BCM43430/2
+
+On BCM43430 revision 2 with firmware 9.88.4.77 (FWID 01-3b307371),
+replacing an occupied CCMP group-key slot can return firmware error -51
+(BCME_REPLAY), mapped to Linux -EBADE. The failed key installation makes
+wpa_supplicant disconnect during an ordinary GTK rotation. The observed
+rekeys carry advancing EAPOL replay counters and different key material;
+the rejection alone does not demonstrate a replayed handshake.
+
+Try the normal installation first. For this exact firmware in station
+mode, recover from BCME_REPLAY by clearing only the selected occupied GTK
+slot and retrying the requested key and receive sequence once. Stop if
+the clear fails, and propagate a failed retry. Use the per-call firmware
+status so other firmware errors and transport errors cannot trigger this
+recovery.
+
+Require a 16-byte CCMP group key and a six-byte receive sequence. Exclude
+pairwise and extended keys and keys matching any cached CCMP key. Check
+the old cache before overwriting it. Do not clear for a known same-key
+reinstallation, which could reset replay state for an existing key.
+
+This is a firmware-specific workaround. The cache is neither a history of
+all previously used keys nor a view of the firmware's live key table.
+Clearing an occupied slot may interrupt reception using that old GTK until
+the new key is installed. It does not guarantee lossless rekeying or prove
+over-the-air replay resistance; both remain relevant review concerns.
+
+On the Raspberry Pi 6.18.39+rpt-rpi-v8 kernel, the equivalent scoped
+recovery completed four successive ten-minute rotations: two direct
+installations and two clear/retry recoveries. Group traffic continued
+after all four, with no reassociation before the planned rollback. The
+stock driver reproduced the failure after rollback. This mainline port
+has not been runtime tested on hardware.
+
+The first affected Linux commit has not been established; the observed
+failure depends on proprietary firmware, so no Fixes tag is asserted.
+
+AI assistance was used for the investigation, implementation and tests.
+Assisted-by: LLM
+---
+ .../broadcom/brcm80211/brcmfmac/cfg80211.c    | 63 ++++++++++++++++---
+ .../broadcom/brcm80211/brcmfmac/fwil.h        |  2 +
+ 2 files changed, 58 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
+index 872c488..cb7a818 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
+@@ -545,7 +545,8 @@ static void convert_key_from_CPU(struct brcmf_wsec_key *key,
+ }
+ 
+ static int
+-send_key_to_dongle(struct brcmf_if *ifp, struct brcmf_wsec_key *key)
++send_key_to_dongle(struct brcmf_if *ifp, struct brcmf_wsec_key *key,
++		   s32 *fwerr)
+ {
+ 	struct brcmf_pub *drvr = ifp->drvr;
+ 	int err;
+@@ -555,8 +556,8 @@ send_key_to_dongle(struct brcmf_if *ifp, struct brcmf_wsec_key *key)
+ 
+ 	brcmf_netdev_wait_pend8021x(ifp);
+ 
+-	err = brcmf_fil_bsscfg_data_set(ifp, "wsec_key", &key_le,
+-					sizeof(key_le));
++	err = brcmf_fil_bsscfg_data_set_with_fwerr(ifp, "wsec_key", &key_le,
++						   sizeof(key_le), fwerr);
+ 
+ 	if (err)
+ 		bphy_err(drvr, "wsec_key error (%d)\n", err);
+@@ -2306,7 +2307,7 @@ brcmf_set_sharedkey(struct net_device *ndev,
+ 	brcmf_dbg(CONN, "key length (%d) key index (%d) algo (%d)\n",
+ 		  key.len, key.index, key.algo);
+ 	brcmf_dbg(CONN, "key \"%s\"\n", key.data);
+-	err = send_key_to_dongle(ifp, &key);
++	err = send_key_to_dongle(ifp, &key, NULL);
+ 	if (err)
+ 		return err;
+ 
+@@ -2800,12 +2801,42 @@ brcmf_cfg80211_del_key(struct wiphy *wiphy, struct wireless_dev *wdev,
+ 	key->flags = BRCMF_PRIMARY_KEY;
+ 
+ 	/* Clear the key/index */
+-	err = send_key_to_dongle(ifp, key);
++	err = send_key_to_dongle(ifp, key, NULL);
+ 
+ 	brcmf_dbg(TRACE, "Exit\n");
+ 	return err;
+ }
+ 
++/* FWID 01-3b307371 is the tested BCM43430/2 release 9.88.4.77. */
++static bool brcmf_gtk_replay_recovery_allowed(struct brcmf_if *ifp, u8 key_idx,
++					      struct key_params *params)
++{
++	struct brcmf_pub *drvr = ifp->drvr;
++	struct brcmf_wsec_key *key = &ifp->vif->profile.key[key_idx];
++	int i;
++
++	if (drvr->bus_if->chip != BRCM_CC_43430_CHIP_ID ||
++	    drvr->bus_if->chiprev != 2 ||
++	    strcmp(drvr->fwver, "01-3b307371") ||
++	    ifp->vif->wdev.iftype != NL80211_IFTYPE_STATION ||
++	    params->cipher != WLAN_CIPHER_SUITE_CCMP ||
++	    params->key_len != 16 || !params->seq || params->seq_len != 6 ||
++	    key->algo != CRYPTO_ALGO_AES_CCM || key->len != 16 ||
++	    !(key->flags & BRCMF_PRIMARY_KEY))
++		return false;
++
++	/* Never clear to reinstall any CCMP key already present in our cache. */
++	for (i = 0; i < BRCMF_MAX_DEFAULT_KEYS; i++) {
++		key = &ifp->vif->profile.key[i];
++		if (key->algo == CRYPTO_ALGO_AES_CCM &&
++		    key->len == params->key_len &&
++		    !memcmp(key->data, params->key, params->key_len))
++			return false;
++	}
++
++	return true;
++}
++
+ static s32
+ brcmf_cfg80211_add_key(struct wiphy *wiphy, struct wireless_dev *wdev,
+ 		       int link_id, u8 key_idx, bool pairwise,
+@@ -2814,12 +2845,15 @@ brcmf_cfg80211_add_key(struct wiphy *wiphy, struct wireless_dev *wdev,
+ 	struct brcmf_cfg80211_info *cfg = wiphy_to_cfg(wiphy);
+ 	struct brcmf_if *ifp = netdev_priv(wdev->netdev);
+ 	struct brcmf_pub *drvr = cfg->pub;
++	struct brcmf_wsec_key clear_key;
+ 	struct brcmf_wsec_key *key;
+ 	s32 val;
+ 	s32 wsec;
+ 	s32 err;
++	s32 fwerr = 0;
+ 	u8 keybuf[8];
+ 	bool ext_key;
++	bool recover_gtk;
+ 
+ 	brcmf_dbg(TRACE, "Enter\n");
+ 	brcmf_dbg(CONN, "key index (%d)\n", key_idx);
+@@ -2849,6 +2883,8 @@ brcmf_cfg80211_add_key(struct wiphy *wiphy, struct wireless_dev *wdev,
+ 	}
+ 
+ 	key = &ifp->vif->profile.key[key_idx];
++	recover_gtk = !pairwise && !ext_key &&
++		brcmf_gtk_replay_recovery_allowed(ifp, key_idx, params);
+ 	memset(key, 0, sizeof(*key));
+ 	if ((ext_key) && (!is_multicast_ether_addr(mac_addr)))
+ 		memcpy((char *)&key->ea, (void *)mac_addr, ETH_ALEN);
+@@ -2907,7 +2943,20 @@ brcmf_cfg80211_add_key(struct wiphy *wiphy, struct wireless_dev *wdev,
+ 		goto done;
+ 	}
+ 
+-	err = send_key_to_dongle(ifp, key);
++	err = send_key_to_dongle(ifp, key, recover_gtk ? &fwerr : NULL);
++	if (err == -EBADE && fwerr == BRCMF_FWERR_REPLAY && recover_gtk) {
++		/* Preserve the requested key and receive sequence across recovery. */
++		memset(&clear_key, 0, sizeof(clear_key));
++		clear_key.index = key_idx;
++		clear_key.flags = BRCMF_PRIMARY_KEY;
++
++		err = send_key_to_dongle(ifp, &clear_key, &fwerr);
++		if (!err)
++			err = send_key_to_dongle(ifp, key, &fwerr);
++		if (!err)
++			brcmf_dbg(CONN, "recovered GTK replay rejection at index %u\n",
++				  key_idx);
++	}
+ 	if (ext_key || err)
+ 		goto done;
+ 
+@@ -3020,7 +3069,7 @@ brcmf_cfg80211_reconfigure_wep(struct brcmf_if *ifp)
+ 	if (key_idx == BRCMF_MAX_DEFAULT_KEYS)
+ 		return;
+ 
+-	err = send_key_to_dongle(ifp, key);
++	err = send_key_to_dongle(ifp, key, NULL);
+ 	if (err) {
+ 		bphy_err(drvr, "Setting WEP key failed (%d)\n", err);
+ 		return;
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.h b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.h
+index f6a65d2..252737b 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.h
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.h
+@@ -146,6 +146,8 @@ s32 brcmf_fil_iovar_int_query(struct brcmf_if *ifp, const char *name, u32 *data)
+ }
+ 
+ 
++#define BRCMF_FWERR_REPLAY	(-51)
++
+ s32 brcmf_fil_bsscfg_data_set_with_fwerr(struct brcmf_if *ifp, const char *name,
+ 					 void *data, u32 len, s32 *fwerr);
+ s32 brcmf_fil_bsscfg_data_set(struct brcmf_if *ifp, const char *name,
+-- 
+2.50.1 (Apple Git-155)
+
